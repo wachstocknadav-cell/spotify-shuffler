@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <script type="module" src="app.js?v=20261004-5"></script>
+  <script type="module" src="app.js?v=20261004-6"></script>
 </head>
 <body>
   <main>
@@ -19,6 +19,8 @@
     <h1>Your playlist.<br>Mixed up.</h1>
     <p class="intro">Shuffle the full playlist and save its new order in Spotify.</p>
     <button id="shuffle" disabled>Shuffle Playlist</button>
+    <button id="pause" class="text-button" hidden>Pause shuffle</button>
+    <button id="discard" class="text-button" hidden>Start a new shuffle</button>
     <p id="status" role="status" aria-live="polite">Getting ready…</p>
     <p class="hint">Keep this page open while shuffling.</p>
     <a href="https://open.spotify.com/playlist/2AtWMamC49m6fXYnE6qCLN" target="_blank" rel="noopener noreferrer">Open playlist in Spotify ↗</a>
@@ -33,6 +35,8 @@
         <label for="redirect">Spotify redirect URI</label>
         <input id="redirect" readonly>
       </form>
+      <button id="check-access" class="text-button">Check Spotify access</button>
+      <p class="hint">Checks the connection without changing your playlist.</p>
     </details>
     <footer>Independent tool. Not affiliated with Spotify.</footer>
   </main>

@@ -46,7 +46,7 @@ test('full paginated shuffle preserves duplicates, unavailable entries, and loca
 });
 test('ambiguous write is not retried and reports partial progress', async () => {
   const f = fixture(10,true);
-  await assert.rejects(shufflePlaylist(f.api,'id',() => {},() => 0),/Some entries may already have moved/);
+  await assert.rejects(shufflePlaylist(f.api,'id',() => {},() => 0),/Progress is saved/);
   assert.equal(f.getWrites(),2); assert.equal(f.getItems().length,10);
 });
 test('changing snapshot prevents writes', async () => {
@@ -89,4 +89,53 @@ test('a temporarily changing read snapshot is retried without any writes', async
   const api=async path => path.includes('/items?') ? {items:[],total:0} : {snapshot_id:++reads===1?'old':'new'};
   const result=await readPlaylist(api,'id',async()=>{pauses++;});
   assert.equal(result.snapshot,'new'); assert.equal(pauses,1);
+});
+
+function memory() {
+  let saved = null;
+  return {load:()=>saved && structuredClone(saved), save:value=>{saved=structuredClone(value);},clear:()=>{saved=null;},value:()=>saved};
+}
+test('quota failure resumes at the saved move without reshuffling completed work', async()=>{
+  const f=fixture(60), store=memory(); let denied=false;
+  const api=async(path,options)=>{
+    if (options?.method==='PUT' && f.getWrites()===7 && !denied) {denied=true; throw Object.assign(new Error('quota'),{definitelyNotApplied:true});}
+    return f.api(path,options);
+  };
+  await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0,store),/quota/);
+  assert.equal(store.value().next,7); assert.equal(store.value().pending,null);
+  const result=await shufflePlaylist(api,'id',()=>{},()=>{throw Error('must reuse original permutation');},store);
+  assert.equal(result.count,60); assert.equal(f.getWrites(),59); assert.equal(store.value(),null);
+});
+test('a timed-out write that applied is reconciled without replaying it', async()=>{
+  const f=fixture(10),store=memory();let lost=false;
+  const api=async(path,options)=>{
+    const result=await f.api(path,options);
+    if (options?.method==='PUT' && !lost) {lost=true;throw new Error('timeout');}
+    return result;
+  };
+  await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0,store),/timeout/);
+  assert.equal(store.value().pending,0);
+  await shufflePlaylist(api,'id',()=>{},()=>0,store);
+  assert.equal(f.getWrites(),9); assert.equal(store.value(),null);
+});
+test('an unconfirmed write is never blindly replayed', async()=>{
+  const f=fixture(10),store=memory();
+  const api=async(path,options)=>{if(options?.method==='PUT')throw new Error('timeout');return f.api(path,options);};
+  await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0,store),/timeout/);
+  await assert.rejects(shufflePlaylist(f.api,'id',()=>{},()=>0,store),/did not confirm/);
+  assert.equal(f.getWrites(),0);
+});
+test('pausing persists progress and verifies the playlist before resuming',async()=>{
+  const f=fixture(10),store=memory();store.shouldPause=()=>f.getWrites()===3;
+  await assert.rejects(shufflePlaylist(f.api,'id',()=>{},()=>0,store),/Paused/);
+  assert.equal(store.value().next,3); delete store.shouldPause;
+  await shufflePlaylist(f.api,'id',()=>{},()=>0,store);
+  assert.equal(f.getWrites(),9);
+});
+test('outside edits prevent a saved plan from resuming',async()=>{
+  const f=fixture(10),store=memory();store.shouldPause=()=>f.getWrites()===3;
+  await assert.rejects(shufflePlaylist(f.api,'id',()=>{},()=>0,store),/Paused/);
+  delete store.shouldPause; f.getItems().reverse();
+  await assert.rejects(shufflePlaylist(f.api,'id',()=>{},()=>0,store),/changed since/);
+  assert.equal(f.getWrites(),3);
 });

@@ -40,11 +40,18 @@ If the public Client ID isn't embedded in config.js, enter it once on each brows
   stale returned snapshot IDs.
 - Final order and count are verified before success. Large playlists may take
   several minutes because Spotify requires sequential reorder calls.
-- Requests are paced at least 350ms apart. Rate limits receive up to five retries
-  using Retry-After (up to 15 minutes) or exponential backoff when it is unavailable,
-  with a visible countdown. Ambiguous network/server
-  failures on writes are not retried: the app stops and reports possible partial
-  reordering. No automatic rollback overwrites later edits.
+- Requests are paced at least 750ms apart. Every 429 stops automatic requests.
+  The response body distinguishes QUOTA_EXCEEDED from a regular rate limit.
+  Retry-After is honored even for long waits. Without it, no reset time is invented.
+  The saved cooldown survives reloads; Check Spotify access makes one read request.
+- Progress is saved in this browser's local storage before and after each move,
+  separately from credentials. It contains the planned order and item identity
+  metadata. Pause shuffle stops after the current step. Resume verifies the saved
+  order before continuing, including after refreshing or reopening the page.
+- Ambiguous network/server failures on writes are never blindly replayed. If a
+  lost response hid a successful move, Resume recognizes the already-applied order.
+  Otherwise Start a new shuffle discards the old plan and uses the current order.
+  No automatic rollback overwrites later edits. Completion clears the saved plan.
 - A uniform random permutation can occasionally match the original order.
 - In Spotify, use custom playlist order to see the changes. Playback shuffle is
   a separate Spotify setting.

@@ -1,5 +1,6 @@
-import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-5';
-import {shufflePlaylist} from './shuffle.js?v=20261004-5';
+import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-6';
+import {shufflePlaylist} from './shuffle.js?v=20261004-6';
+import {spotifyFailure} from './spotify-errors.js?v=20261004-6';
 
 const $ = id => document.getElementById(id);
 const redirect = new URL('./', location.href).href;
@@ -10,15 +11,38 @@ let token;
 try { token = JSON.parse(sessionStorage.getItem(key + 'token') || 'null'); } catch { token = null; }
 let busy = false;
 let lastRequest = 0;
+let pauseRequested = false;
+const planKey = () => key + 'progress:' + clientId;
+const limitKey = () => key + 'limit:' + clientId;
+const readLimit = () => { try { return JSON.parse(localStorage.getItem(limitKey()) || 'null'); } catch { return null; } };
+const hasProgress = () => !!localStorage.getItem(planKey());
+let needsRestart = localStorage.getItem(key + 'restart') === 'true';
 const status = (text, error = false) => { $('status').textContent = text; $('status').dataset.error = String(error); };
 const base64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomString = () => base64(crypto.getRandomValues(new Uint8Array(48)));
 function render() {
-  $('shuffle').disabled = busy || !/^[a-f\d]{32}$/i.test(clientId);
+  const limit = readLimit();
+  const cooling = limit?.until && limit.until > Date.now();
+  $('shuffle').disabled = busy || cooling || !/^[a-f\d]{32}$/i.test(clientId) || (needsRestart && !limit);
+  $('shuffle').textContent = cooling ? 'Spotify cooldown' : limit ? 'Check Spotify access' : hasProgress() ? 'Resume shuffle' : 'Shuffle Playlist';
   $('disconnect').hidden = !token;
   $('disconnect').disabled = busy;
   $('client-id').disabled = busy;
   $('setup').querySelector('button').disabled = busy;
+  $('check-access').disabled = busy || cooling || !/^[a-f\d]{32}$/i.test(clientId);
+  $('pause').hidden = !busy || !token;
+  $('pause').disabled = pauseRequested;
+  $('discard').hidden = !needsRestart || busy;
+}
+function showLimit() {
+  const limit = readLimit();
+  if (!limit || busy) return;
+  const saved = hasProgress() ? ' Your shuffle progress is saved.' : '';
+  const timing = limit.until && limit.until > Date.now()
+    ? ` Try again after ${new Date(limit.until).toLocaleString()}.`
+    : ' Use Check Spotify access later.';
+  status(limit.message + timing + saved, true);
+  render();
 }
 function clearToken() { token = null; sessionStorage.removeItem(key + 'token'); render(); }
 async function exchange(params) {
@@ -29,7 +53,7 @@ async function exchange(params) {
       body: new URLSearchParams({client_id: clientId, ...params}), signal: AbortSignal.timeout(30000)
     });
   } catch { throw new Error('Could not connect to Spotify. Check your connection and try again.'); }
-  if (!response.ok) { clearToken(); throw new Error('Spotify sign-in expired or setup is incorrect. Check your Client ID and redirect URI, then connect again.'); }
+  if (!response.ok) { if ([400,401].includes(response.status)) clearToken(); throw new Error('Spotify could not refresh your sign-in. Please try connecting again later.'); }
   const data = await response.json();
   if (!data.access_token) throw new Error('Spotify did not return a usable sign-in. Please reconnect.');
   token = {access: data.access_token, refresh: data.refresh_token || token?.refresh, expires: Date.now() + data.expires_in * 1000};
@@ -56,55 +80,61 @@ async function callback() {
   await exchange({grant_type: 'authorization_code', code: params.get('code'), redirect_uri: redirect, code_verifier: auth.verifier});
   status('Connected. Ready to shuffle your playlist.');
 }
-async function api(path, options = {}, retries = 0) {
+async function api(path, options = {}, refreshed = false) {
   if (!token) throw new Error('Please connect to Spotify again.');
+  const existing = readLimit();
+  if (existing?.until > Date.now()) throw Object.assign(new Error(existing.message), {definitelyNotApplied:true,kind:existing.kind,until:existing.until});
   if (token.expires < Date.now() + 60000) {
     if (!token.refresh) { clearToken(); throw new Error('Please connect to Spotify again.'); }
-    await exchange({grant_type: 'refresh_token', refresh_token: token.refresh});
+    try { await exchange({grant_type:'refresh_token',refresh_token:token.refresh}); }
+    catch (error) { error.definitelyNotApplied = true; throw error; }
   }
   let response;
   try {
-    await new Promise(resolve => setTimeout(resolve, Math.max(0, 350 - (Date.now() - lastRequest))));
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, 750 - (Date.now() - lastRequest))));
     lastRequest = Date.now();
     response = await fetch('https://api.spotify.com/v1' + path, {
-      method: options.method || 'GET', headers: {Authorization: `Bearer ${token.access}`, 'Content-Type': 'application/json'},
-      body: options.body ? JSON.stringify(options.body) : undefined, signal: AbortSignal.timeout(30000), cache: 'no-store'
+      method:options.method || 'GET', headers:{Authorization:`Bearer ${token.access}`,'Content-Type':'application/json'},
+      body:options.body ? JSON.stringify(options.body) : undefined, signal:AbortSignal.timeout(45000), cache:'no-store'
     });
-  } catch { throw new Error('Connection interrupted. Spotify may have received the last move; its result is uncertain.'); }
-  if (response.status === 401 && retries < 1 && token.refresh) {
-    await exchange({grant_type: 'refresh_token', refresh_token: token.refresh});
-    return api(path, options, retries + 1);
-  }
-  if (response.status === 429) {
-    const seconds = Number(response.headers.get('Retry-After') || 30 * 2 ** retries);
-    if (retries < 5 && Number.isFinite(seconds) && seconds >= 0 && seconds <= 900) {
-      const until = Date.now() + Math.max(1, seconds) * 1000;
-      do {
-        status(`Spotify’s request limit reached. Resuming in ${Math.ceil((until - Date.now()) / 1000)} seconds. Keep this page open.`);
-        await new Promise(resolve => setTimeout(resolve, Math.min(1000, Math.max(1, until - Date.now()))));
-      } while (Date.now() < until);
-      return api(path, options, retries + 1);
-    }
-    throw new Error('Spotify is limiting requests. Wait a while before shuffling again.');
+  } catch { throw new Error('The connection timed out or was interrupted. Saved progress will be checked before any more moves.'); }
+  if (response.status === 401 && !refreshed && token.refresh) {
+    try { await exchange({grant_type:'refresh_token',refresh_token:token.refresh}); }
+    catch (error) { error.definitelyNotApplied = true; throw error; }
+    return api(path,options,true);
   }
   if (!response.ok) {
-    if (response.status === 401) { clearToken(); throw new Error('Please connect to Spotify again.'); }
-    if (response.status === 403) throw new Error('Spotify denied access. Use the playlist owner or a collaborator account, check the app’s allowed users, and confirm the developer account has Premium.');
-    if (response.status === 404) throw new Error('Spotify could not find this playlist for your account.');
-    throw new Error(`Spotify could not complete the request (${response.status}). Please try again later.`);
+    if (response.status === 401) { clearToken(); throw Object.assign(new Error('Please connect to Spotify again.'),{definitelyNotApplied:true}); }
+    const body = await response.json().catch(() => null);
+    const error = spotifyFailure(response.status,response.headers.get('Retry-After'),body);
+    if (response.status === 429) localStorage.setItem(limitKey(),JSON.stringify({kind:error.kind,until:error.until,message:error.message}));
+    throw error;
   }
   return response.json();
 }
-async function run() {
+async function run(checkOnly = false) {
   if (busy) return;
-  busy = true; render();
+  if (readLimit()?.until > Date.now()) { showLimit(); return; }
+  busy = true; pauseRequested = false; render();
   try {
     if (!token) { status('Connecting to Spotify…'); await authenticate(); return; }
     if (!navigator.onLine) throw new Error('You are offline. Connect to the internet and try again.');
     const work = async () => {
-      status('Loading the full playlist…');
+      if (checkOnly || readLimit()) {
+        status('Checking Spotify access…');
+        await api(`/playlists/${PLAYLIST_ID}?fields=snapshot_id`);
+        localStorage.removeItem(limitKey());
+        status('Spotify access is working. Tap the main button when ready to shuffle.');
+        return;
+      }
+      status(hasProgress() ? 'Checking saved progress…' : 'Loading the full playlist…');
       const result = await shufflePlaylist(api, PLAYLIST_ID, (done, total, count) => {
         status(done === total ? 'Checking the saved order…' : `Shuffling ${count} entries… ${Math.round(done / total * 100)}%. Keep this page open.`);
+      }, undefined, {
+        load:() => JSON.parse(localStorage.getItem(planKey()) || 'null'),
+        save:plan => localStorage.setItem(planKey(),JSON.stringify(plan)),
+        clear:() => { localStorage.removeItem(planKey()); localStorage.removeItem(key + 'restart'); needsRestart = false; },
+        shouldPause:() => pauseRequested
       });
       status(result.unchanged ? 'This playlist needs at least two entries to shuffle.' : `Done! All ${result.count} entries are in their new order. In Spotify, choose Custom order, turn shuffle off, and play from the first track.`);
     };
@@ -114,10 +144,18 @@ async function run() {
         await work();
       });
     } else await work();
-  } catch (error) { status(error.message, true); }
-  finally { busy = false; render(); }
+  } catch (error) {
+    if (error.conflict) { needsRestart = true; localStorage.setItem(key + 'restart','true'); }
+    status(error.message,true);
+  } finally { busy = false; render(); showLimit(); }
 }
-$('shuffle').addEventListener('click', run);
+$('shuffle').addEventListener('click', () => run());
+$('check-access').addEventListener('click', () => run(true));
+$('pause').addEventListener('click', () => { pauseRequested = true; status('Pausing after the current step…'); render(); });
+$('discard').addEventListener('click', () => {
+  localStorage.removeItem(planKey()); localStorage.removeItem(key + 'restart'); needsRestart = false;
+  status('Ready to start a new shuffle from the current playlist order.'); render(); showLimit();
+});
 $('disconnect').addEventListener('click', () => { clearToken(); status('Disconnected. Tap Shuffle Playlist to reconnect.'); });
 $('setup').addEventListener('submit', event => {
   event.preventDefault();
@@ -126,11 +164,13 @@ $('setup').addEventListener('submit', event => {
   localStorage.setItem(key + 'client', clientId); clearToken(); $('settings').open = false;
   status('Setup saved. Tap Shuffle Playlist to connect.'); render();
 });
-window.addEventListener('beforeunload', event => { if (busy && token) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('storage', () => { if (!busy) { render(); showLimit(); } });
 $('client-id').value = clientId;
 $('redirect').value = redirect;
 $('settings').open = !clientId;
-status(clientId ? (token ? 'Ready to shuffle your playlist.' : 'Tap Shuffle Playlist to connect to Spotify.') : 'Add your Spotify Client ID in Setup to get started.');
+status(clientId ? (hasProgress() ? 'Saved progress is ready to resume.' : token ? 'Ready to shuffle your playlist.' : 'Tap Shuffle Playlist to connect to Spotify.') : 'Add your Spotify Client ID in Setup to get started.');
 busy = true; render();
 try { await callback(); } catch (error) { status(error.message, true); }
-finally { busy = false; render(); }
+finally { busy = false; render(); showLimit(); }
+
+setInterval(() => { if (!busy) showLimit(); },1000);
