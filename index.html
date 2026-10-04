@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111916">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <title>Playlist Shuffler</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <img class="mark" src="icon.svg" width="72" height="72" alt="">
+    <p class="eyebrow">A FRESH ORDER</p>
+    <h1>Your playlist.<br>Mixed up.</h1>
+    <p class="intro">Shuffle the full playlist and save its new order in Spotify.</p>
+    <button id="shuffle" disabled>Shuffle Playlist</button>
+    <p id="status" role="status" aria-live="polite">Getting ready…</p>
+    <p class="hint">Keep this page open while shuffling.</p>
+    <a href="https://open.spotify.com/playlist/2AtWMamC49m6fXYnE6qCLN" target="_blank" rel="noopener noreferrer">Open playlist in Spotify ↗</a>
+    <button id="disconnect" class="text-button" hidden>Disconnect Spotify</button>
+    <details id="settings">
+      <summary>Setup</summary>
+      <form id="setup">
+        <label for="client-id">Spotify Client ID</label>
+        <input id="client-id" autocomplete="off" spellcheck="false" pattern="[a-fA-F0-9]{32}" required>
+        <p class="hint">Use the public Client ID from your Spotify app. Never enter a client secret.</p>
+        <button class="secondary" type="submit">Save setup</button>
+        <label for="redirect">Spotify redirect URI</label>
+        <input id="redirect" readonly>
+      </form>
+    </details>
+    <footer>Independent tool. Not affiliated with Spotify.</footer>
+  </main>
+</body>
+</html>
