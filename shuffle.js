@@ -64,26 +64,24 @@ export async function shufflePlaylist(api, id, progress, random = randomBelow) {
   const order = permutation(initial.items.length, random);
   const moves = movesFor(order);
   const expected = [...initial.items];
-  let snapshot = initial.snapshot;
   let attempted = false;
+  const matches = items => items.length === expected.length && items.every((entry, i) => identity(entry) === identity(expected[i]));
   try {
+    const latest = await api(`/playlists/${id}?fields=snapshot_id`);
+    if (latest.snapshot_id !== initial.snapshot) throw new Error('The playlist was edited elsewhere. Shuffle stopped to avoid mixing edits.');
     for (let i = 0; i < moves.length; i++) {
-      progress(i, moves.length);
-      const latest = await api(`/playlists/${id}?fields=snapshot_id`);
-      if (latest.snapshot_id !== snapshot) {
-        // Spotify's write response and subsequent reads can report different
-        // snapshot versions. Continue only if a stable full read proves that
-        // every occurrence is still exactly where our last move left it.
-        if (!attempted) throw new Error('The playlist was edited elsewhere. Shuffle stopped to avoid mixing edits.');
-        const observed = await readPlaylist(api, id);
-        if (observed.items.length !== expected.length || observed.items.some((entry, position) => identity(entry) !== identity(expected[position]))) throw new Error('The playlist order changed unexpectedly. Shuffle stopped to avoid mixing edits.');
-        snapshot = observed.snapshot;
-      }
+      progress(i, moves.length, initial.items.length);
       attempted = true;
-      const result = await api(`/playlists/${id}/items`, {method: 'PUT', body: {...moves[i], snapshot_id: snapshot}});
+      // Omit the optional snapshot: positions describe the current saved order.
+      // Returned write snapshots can lag the actual playlist, so verify content
+      // at checkpoints instead of rereading the entire list after every move.
+      const result = await api(`/playlists/${id}/items`, {method: 'PUT', body: moves[i]});
       if (!result.snapshot_id) throw new Error('Spotify did not confirm the new order.');
-      snapshot = result.snapshot_id;
       expected.splice(moves[i].insert_before, 0, expected.splice(moves[i].range_start, 1)[0]);
+      if ((i + 1) % 50 === 0 && i + 1 < moves.length) {
+        const observed = await readPlaylist(api, id);
+        if (!matches(observed.items)) throw new Error('The playlist order changed unexpectedly. Shuffle stopped to avoid mixing edits.');
+      }
     }
     progress(moves.length, moves.length);
     const final = await readPlaylist(api, id);

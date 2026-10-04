@@ -32,12 +32,17 @@ If the public Client ID isn't embedded in config.js, enter it once on each brows
 - Reads every page (50 entries at a time), shuffles all positions with unbiased
   Fisher–Yates using Web Crypto, and performs only reorder operations.
 - Duplicate, unavailable, and local-file entries are never filtered or recreated.
-- Snapshot checks detect concurrent edits; a same-browser lock prevents two tabs
+- Initial snapshot and periodic full-order checks detect concurrent edits; a same-browser lock prevents two tabs
   shuffling together. Avoid editing the playlist elsewhere during a shuffle.
-  Snapshot checks cannot provide an atomic lock against another Spotify client.
+  Checks occur every 50 moves and at completion, so edits elsewhere may be detected
+  after some moves have already happened. This cannot provide an atomic lock against
+  another Spotify client. Reorders use current positions rather than potentially
+  stale returned snapshot IDs.
 - Final order and count are verified before success. Large playlists may take
   several minutes because Spotify requires sequential reorder calls.
-- Rate limits receive bounded retries using Retry-After. Ambiguous network/server
+- Requests are paced at least 350ms apart. Rate limits receive up to five retries
+  using Retry-After (up to 15 minutes) or exponential backoff when it is unavailable,
+  with a visible countdown. Ambiguous network/server
   failures on writes are not retried: the app stops and reports possible partial
   reordering. No automatic rollback overwrites later edits.
 - A uniform random permutation can occasionally match the original order.

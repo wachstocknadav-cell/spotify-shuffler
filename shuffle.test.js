@@ -22,7 +22,7 @@ function fixture(n, fail = false) {
   const offsets = [];
   const api = async (path, options = {}) => {
     if (options.method === 'PUT') {
-      assert.equal(options.body.snapshot_id,String(version));
+      assert.equal('snapshot_id' in options.body,false);
       assert.equal('uris' in options.body,false);
       writes++;
       if (fail && writes === 2) throw new Error('network failure');
@@ -62,27 +62,27 @@ test('external edit before a move aborts safely', async () => {
   await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0),/edited elsewhere/);
   assert.equal(f.getWrites(),0);
 });
-test('a different write snapshot is reconciled only against the complete expected order', async () => {
+test('lagging write snapshots do not trigger excessive full-playlist reads', async () => {
   const f = fixture(57);
   const api = async (path, options) => {
     const result = await f.api(path, options);
     return options?.method === 'PUT' ? {snapshot_id:'write-response-version'} : result;
   };
   const result = await shufflePlaylist(api,'id',()=>{},()=>0);
-  assert.equal(result.count,57);
+  assert.equal(result.count,57); assert.equal(f.offsets.length,6);
 });
 test('a real order change after a write stops further moves', async () => {
-  const f = fixture(10);
+  const f = fixture(60);
   const api = async (path, options) => {
     const result = await f.api(path,options);
     if (options?.method === 'PUT') {
-      f.getItems().reverse();
+      if (f.getWrites() === 1) f.getItems().reverse();
       return {snapshot_id:'different'};
     }
     return result;
   };
   await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0),/order changed unexpectedly/);
-  assert.equal(f.getWrites(),1);
+  assert.equal(f.getWrites(),50);
 });
 test('a temporarily changing read snapshot is retried without any writes', async () => {
   let reads=0, pauses=0;

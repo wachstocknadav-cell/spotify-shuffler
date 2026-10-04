@@ -1,5 +1,5 @@
-import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-4';
-import {shufflePlaylist} from './shuffle.js?v=20261004-4';
+import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-5';
+import {shufflePlaylist} from './shuffle.js?v=20261004-5';
 
 const $ = id => document.getElementById(id);
 const redirect = new URL('./', location.href).href;
@@ -9,6 +9,7 @@ let clientId = CLIENT_ID || localStorage.getItem(key + 'client') || '';
 let token;
 try { token = JSON.parse(sessionStorage.getItem(key + 'token') || 'null'); } catch { token = null; }
 let busy = false;
+let lastRequest = 0;
 const status = (text, error = false) => { $('status').textContent = text; $('status').dataset.error = String(error); };
 const base64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomString = () => base64(crypto.getRandomValues(new Uint8Array(48)));
@@ -63,6 +64,8 @@ async function api(path, options = {}, retries = 0) {
   }
   let response;
   try {
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, 350 - (Date.now() - lastRequest))));
+    lastRequest = Date.now();
     response = await fetch('https://api.spotify.com/v1' + path, {
       method: options.method || 'GET', headers: {Authorization: `Bearer ${token.access}`, 'Content-Type': 'application/json'},
       body: options.body ? JSON.stringify(options.body) : undefined, signal: AbortSignal.timeout(30000), cache: 'no-store'
@@ -73,10 +76,13 @@ async function api(path, options = {}, retries = 0) {
     return api(path, options, retries + 1);
   }
   if (response.status === 429) {
-    const seconds = Number(response.headers.get('Retry-After') || 30);
-    if (retries < 3 && Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) {
-      status(`Spotify needs a pause. Continuing in ${Math.max(1, seconds)} seconds…`);
-      await new Promise(resolve => setTimeout(resolve, Math.max(1, seconds) * 1000));
+    const seconds = Number(response.headers.get('Retry-After') || 30 * 2 ** retries);
+    if (retries < 5 && Number.isFinite(seconds) && seconds >= 0 && seconds <= 900) {
+      const until = Date.now() + Math.max(1, seconds) * 1000;
+      do {
+        status(`Spotify’s request limit reached. Resuming in ${Math.ceil((until - Date.now()) / 1000)} seconds. Keep this page open.`);
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000, Math.max(1, until - Date.now()))));
+      } while (Date.now() < until);
       return api(path, options, retries + 1);
     }
     throw new Error('Spotify is limiting requests. Wait a while before shuffling again.');
@@ -97,8 +103,8 @@ async function run() {
     if (!navigator.onLine) throw new Error('You are offline. Connect to the internet and try again.');
     const work = async () => {
       status('Loading the full playlist…');
-      const result = await shufflePlaylist(api, PLAYLIST_ID, (done, total) => {
-        status(done === total ? 'Checking the saved order…' : `Shuffling… ${Math.round(done / total * 100)}%. Keep this page open.`);
+      const result = await shufflePlaylist(api, PLAYLIST_ID, (done, total, count) => {
+        status(done === total ? 'Checking the saved order…' : `Shuffling ${count} entries… ${Math.round(done / total * 100)}%. Keep this page open.`);
       });
       status(result.unchanged ? 'This playlist needs at least two entries to shuffle.' : `Done! All ${result.count} entries are in their new order. In Spotify, choose Custom order, turn shuffle off, and play from the first track.`);
     };
