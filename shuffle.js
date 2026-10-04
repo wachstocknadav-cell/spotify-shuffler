@@ -28,7 +28,7 @@ export function movesFor(order) {
   return moves;
 }
 
-export async function readPlaylist(api, id) {
+async function readPlaylistOnce(api, id) {
   const path = `/playlists/${id}`;
   const before = await api(`${path}?fields=snapshot_id`);
   let items = [], total;
@@ -42,6 +42,18 @@ export async function readPlaylist(api, id) {
   const after = await api(`${path}?fields=snapshot_id`);
   if (!before.snapshot_id || before.snapshot_id !== after.snapshot_id || items.length !== total) throw new Error('The playlist changed while loading. Please try again.');
   return {items, snapshot: after.snapshot_id};
+}
+
+export async function readPlaylist(api, id, pause = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await readPlaylistOnce(api, id); }
+    catch (error) {
+      // Allow Spotify's read replicas to settle after a confirmed reorder.
+      // Only repeat reads, never an ambiguous write.
+      if (attempt >= 4 || !error.message.includes('changed while loading')) throw error;
+      await pause(400 * 2 ** attempt);
+    }
+  }
 }
 
 export const identity = entry => JSON.stringify([entry.item?.uri ?? entry.track?.uri ?? null, entry.added_at ?? null, entry.is_local ?? false]);

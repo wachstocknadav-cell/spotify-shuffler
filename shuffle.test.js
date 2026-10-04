@@ -51,7 +51,7 @@ test('ambiguous write is not retried and reports partial progress', async () => 
 });
 test('changing snapshot prevents writes', async () => {
   let version = 0;
-  await assert.rejects(readPlaylist(async path => path.includes('/items?') ? {items:[],total:0} : {snapshot_id:String(++version)},'id'),/changed while loading/);
+  await assert.rejects(readPlaylist(async path => path.includes('/items?') ? {items:[],total:0} : {snapshot_id:String(++version)},'id',async()=>{}),/changed while loading/);
 });
 test('empty pagination fails instead of looping', async () => {
   await assert.rejects(readPlaylist(async path => path.includes('/items?') ? {items:[],total:5} : {snapshot_id:'a'},'id'),/incomplete/);
@@ -83,4 +83,10 @@ test('a real order change after a write stops further moves', async () => {
   };
   await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0),/order changed unexpectedly/);
   assert.equal(f.getWrites(),1);
+});
+test('a temporarily changing read snapshot is retried without any writes', async () => {
+  let reads=0, pauses=0;
+  const api=async path => path.includes('/items?') ? {items:[],total:0} : {snapshot_id:++reads===1?'old':'new'};
+  const result=await readPlaylist(api,'id',async()=>{pauses++;});
+  assert.equal(result.snapshot,'new'); assert.equal(pauses,1);
 });

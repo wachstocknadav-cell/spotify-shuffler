@@ -1,5 +1,5 @@
-import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-3';
-import {shufflePlaylist} from './shuffle.js?v=20261004-3';
+import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-4';
+import {shufflePlaylist} from './shuffle.js?v=20261004-4';
 
 const $ = id => document.getElementById(id);
 const redirect = new URL('./', location.href).href;
