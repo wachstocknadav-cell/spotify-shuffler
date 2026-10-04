@@ -1,5 +1,5 @@
-import {CLIENT_ID, PLAYLIST_ID} from './config.js';
-import {shufflePlaylist} from './shuffle.js';
+import {CLIENT_ID, PLAYLIST_ID} from './config.js?v=20261004-3';
+import {shufflePlaylist} from './shuffle.js?v=20261004-3';
 
 const $ = id => document.getElementById(id);
 const redirect = new URL('./', location.href).href;
@@ -100,7 +100,7 @@ async function run() {
       const result = await shufflePlaylist(api, PLAYLIST_ID, (done, total) => {
         status(done === total ? 'Checking the saved order…' : `Shuffling… ${Math.round(done / total * 100)}%. Keep this page open.`);
       });
-      status(result.unchanged ? 'This playlist needs at least two entries to shuffle.' : `Done! All ${result.count} entries are in their new order.`);
+      status(result.unchanged ? 'This playlist needs at least two entries to shuffle.' : `Done! All ${result.count} entries are in their new order. In Spotify, choose Custom order, turn shuffle off, and play from the first track.`);
     };
     if (navigator.locks) {
       await navigator.locks.request(key + 'shuffle', {ifAvailable: true}, async lock => {
