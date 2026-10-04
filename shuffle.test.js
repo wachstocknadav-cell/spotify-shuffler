@@ -62,3 +62,25 @@ test('external edit before a move aborts safely', async () => {
   await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0),/edited elsewhere/);
   assert.equal(f.getWrites(),0);
 });
+test('a different write snapshot is reconciled only against the complete expected order', async () => {
+  const f = fixture(57);
+  const api = async (path, options) => {
+    const result = await f.api(path, options);
+    return options?.method === 'PUT' ? {snapshot_id:'write-response-version'} : result;
+  };
+  const result = await shufflePlaylist(api,'id',()=>{},()=>0);
+  assert.equal(result.count,57);
+});
+test('a real order change after a write stops further moves', async () => {
+  const f = fixture(10);
+  const api = async (path, options) => {
+    const result = await f.api(path,options);
+    if (options?.method === 'PUT') {
+      f.getItems().reverse();
+      return {snapshot_id:'different'};
+    }
+    return result;
+  };
+  await assert.rejects(shufflePlaylist(api,'id',()=>{},()=>0),/order changed unexpectedly/);
+  assert.equal(f.getWrites(),1);
+});

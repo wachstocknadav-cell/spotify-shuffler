@@ -51,21 +51,31 @@ export async function shufflePlaylist(api, id, progress, random = randomBelow) {
   if (initial.items.length < 2) return {count: initial.items.length, unchanged: true};
   const order = permutation(initial.items.length, random);
   const moves = movesFor(order);
+  const expected = [...initial.items];
   let snapshot = initial.snapshot;
   let attempted = false;
   try {
     for (let i = 0; i < moves.length; i++) {
       progress(i, moves.length);
       const latest = await api(`/playlists/${id}?fields=snapshot_id`);
-      if (latest.snapshot_id !== snapshot) throw new Error('The playlist was edited elsewhere. Shuffle stopped to avoid mixing edits.');
+      if (latest.snapshot_id !== snapshot) {
+        // Spotify's write response and subsequent reads can report different
+        // snapshot versions. Continue only if a stable full read proves that
+        // every occurrence is still exactly where our last move left it.
+        if (!attempted) throw new Error('The playlist was edited elsewhere. Shuffle stopped to avoid mixing edits.');
+        const observed = await readPlaylist(api, id);
+        if (observed.items.length !== expected.length || observed.items.some((entry, position) => identity(entry) !== identity(expected[position]))) throw new Error('The playlist order changed unexpectedly. Shuffle stopped to avoid mixing edits.');
+        snapshot = observed.snapshot;
+      }
       attempted = true;
       const result = await api(`/playlists/${id}/items`, {method: 'PUT', body: {...moves[i], snapshot_id: snapshot}});
       if (!result.snapshot_id) throw new Error('Spotify did not confirm the new order.');
       snapshot = result.snapshot_id;
+      expected.splice(moves[i].insert_before, 0, expected.splice(moves[i].range_start, 1)[0]);
     }
     progress(moves.length, moves.length);
     const final = await readPlaylist(api, id);
-    if (final.snapshot !== snapshot || final.items.length !== order.length || final.items.some((entry, i) => identity(entry) !== identity(initial.items[order[i]]))) throw new Error('The final playlist order could not be verified.');
+    if (final.items.length !== order.length || final.items.some((entry, i) => identity(entry) !== identity(initial.items[order[i]]))) throw new Error('The final playlist order could not be verified.');
     return {count: final.items.length};
   } catch (error) {
     if (attempted) error.message += ' Some entries may already have moved. No entries were added or removed by this app. You can shuffle again.';
