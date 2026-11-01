@@ -143,6 +143,7 @@ async function run(checkOnly = false) {
   if (busy) return;
   if (readLimit()?.until > Date.now()) { showLimit(); return; }
   busy = true; pauseRequested = false; render();
+  await keepScreenAwake();
   try {
     if (!token) { status('Connecting to Spotify…'); await authenticate(); return; }
     if (!navigator.onLine) throw new Error('You are offline. Connect to the internet and try again.');
