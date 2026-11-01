@@ -175,7 +175,14 @@ async function run(checkOnly = false) {
   } catch (error) {
     if (error.conflict) { needsRestart = true; localStorage.setItem(key + 'restart','true'); }
     status(error.message,true);
-  } finally { busy = false; render(); showLimit(); }
+  
+} finally {
+  busy = false;
+  await releaseScreen();
+  render();
+  showLimit();
+  }
+  
 }
 $('shuffle').addEventListener('click', () => run());
 $('check-access').addEventListener('click', () => run(true));
