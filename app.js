@@ -10,6 +10,33 @@ let clientId = CLIENT_ID || localStorage.getItem(key + 'client') || '';
 let token;
 try { token = JSON.parse(sessionStorage.getItem(key + 'token') || 'null'); } catch { token = null; }
 let busy = false;
+
+let wakeLock = null;
+
+async function keepScreenAwake() {
+  if (!('wakeLock' in navigator) || wakeLock || document.visibilityState !== 'visible') return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => {
+      wakeLock = null;
+    });
+  } catch (error) {
+    console.warn('Screen wake lock unavailable:', error);
+  }
+}
+
+async function releaseScreen() {
+  const lock = wakeLock;
+  wakeLock = null;
+  if (lock) await lock.release().catch(() => {});
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && busy) {
+    keepScreenAwake();
+  }
+});
+  
 let lastRequest = 0;
 let pauseRequested = false;
 const planKey = () => key + 'progress:' + clientId;
